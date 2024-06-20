@@ -1,0 +1,89 @@
+pipeline {
+    agent any
+    tools{
+        
+        maven 'maven'
+    }
+     environment {
+        // Ensure this ID matches the one set in Jenkins credentials
+        SCANNER_HOME = tool'sonar' 
+    }
+
+    stages {
+        stage('clean workspace ') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('git checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/karthikeya142/Mission.git'
+            }
+        }
+        stage('Compile') {
+            steps {
+               sh 'mvn compile'
+            }
+        }
+        stage('test') {
+            steps {
+               sh 'mvn test -DskipTests=true'
+            }
+        }
+        stage('Trivy') {
+            steps {
+                sh 'trivy fs --format table -o trivy-fs-report.html .'
+            }
+        }
+        stage('Sonar Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    // Ensure the scanner is correctly installed and accessible
+                    // sh 'sonar-scanner -Dsonar.login=$SONARQUBE_TOKEN'
+                     sh ''' $SCANNER_HOME/bin/sonar-scanner \
+                    -Dsonar.projectKey=Mission \
+                    -Dsonar.projectName=Mission \
+                     -Dsonar.java.binaries=.'''
+                }
+            }
+        }
+         stage('Build') {
+            steps {
+               sh 'mvn clean package -DskipTests=true'
+            }
+        }
+        stage ("Build Dockerfile") {
+            steps {
+               
+                    sh 'docker build -t mission .'
+
+                
+            }
+        }
+        stage('Trivy image scan') {
+            steps {
+                sh 'trivy image --format table -o trivy-image-report.html mission'
+            }
+        }
+
+         stage ("tag image docer hub") {
+            steps {
+                script{
+               withDockerRegistry(credentialsId: 'docker') {
+                    // some block
+                     sh 'docker tag mission karthik142/mission:mission'
+                     sh 'docker push   karthik142/mission:mission'
+
+                     }
+                 }
+            }
+        }
+        stage ("Deploy") {
+            steps {
+                sh 'docker run -d --name  mission -p 8083:8080  karthik142/mission:mission '
+            }
+        }
+
+
+    }
+}
